@@ -1,13 +1,8 @@
-
-  """
-  This class introduced dictionary of mnemonic words
-  Usually used to restore access to the Deterministic or Hierarchical Wallet
-
-  """
-
-
-  #Eng dictionary words
-  eng_dict = [
+"""
+Dictionary of mnemonic words
+Usually used to restore access to the Deterministic or Hierarchical Wallet
+"""
+eng_dict = [
     "abandon",
     "ability",
     "able",
@@ -2056,4 +2051,4 @@
     "zero",
     "zone",
     "zoo"
-  ]
+]
