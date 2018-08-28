@@ -329,7 +329,6 @@ def get_tx(tx):
             witness = witness[:count]
             tx_outs = witness
             wtn_count -= 1
-    if flag_offset:
         res_tx['tx_witnesses'] = witnesses
 
     lock_time = tx_outs[:4]
@@ -517,6 +516,7 @@ def parse_var_str(data):
     return string, total_length
 
 
+# TODO check for malleability BIP62, BIP66
 def get_tx_id(raw_tx):
     return binascii.hexlify(hashlib.sha256(hashlib.sha256(raw_tx).digest()).digest()[::-1]).decode()
 

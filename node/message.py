@@ -45,7 +45,7 @@ class Type:
 # reply
 # ping
 # pong
-# reject
+# reject # All implementations of the P2P protocol version 70,002 and later should support the reject message.
 
 # These messages are related to Bloom filtering of connections and are defined in BIP 0037:
 # filterload BIP37
@@ -84,9 +84,13 @@ def make(magic, command, payload):
 #  ? 	        user_agent 	    var_str 	User Agent (0x00 if string is 0 bytes long)
 # 4 	        start_height 	int32_t 	The last block received by the emitting node
 # Fields below require version ≥ 70001
-# 1 	        relay 	        bool 	Whether the remote peer should announce relayed transactions or not, see BIP 0037
+# 1 	        relay 	        bool 	    Whether the remote peer should announce relayed transactions or not,
+#                                           see BIP 0037
+#                                           If false then broadcast transactions will not be announced until
+#                                           a filter{load,add,clear} command is received. If missing or true, no change
+#                                           in protocol behaviour occurs.
 def get_version(version=settings.VERSION, services=0, addr_recv=['127.0.0.1', 18333],
-                addr_from=['127.0.0.1', 18333], user_agent='', start_height=0):
+                addr_from=['127.0.0.1', 18333], user_agent='/Testoshi/', start_height=0):
     version = version
     services = services
     timestamp = int(time.time())
@@ -96,8 +100,8 @@ def get_version(version=settings.VERSION, services=0, addr_recv=['127.0.0.1', 18
     user_agent = varstr(user_agent)
     start_height = start_height
 
-    payload = struct.pack('<LQQ26s26sQsL', version, services, timestamp, addr_recv,
-                          addr_from, nonce, user_agent, start_height)
+    payload = struct.pack('<LQQ26s26sQ', version, services, timestamp, addr_recv,
+                          addr_from, nonce) + user_agent + struct.pack('<L', start_height)
     return make(settings.MAGIC, 'version', payload)
 
 

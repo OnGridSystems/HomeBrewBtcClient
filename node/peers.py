@@ -19,14 +19,7 @@ def lookup():
     return check_peers(peers)
 
 
-def check_peer(peer, port=settings.DEFAULT_PORT):
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-        sock.settimeout(1)
-        connected = sock.connect_ex((peer, port)) == 0
-    return connected
-
-
-def check_peer_2(peer):
+def check_peer(peer):
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.settimeout(1)
         connected = peer if sock.connect_ex((peer, settings.DEFAULT_PORT)) == 0 else None
@@ -35,7 +28,7 @@ def check_peer_2(peer):
 
 def check_peers(peers):
     pool = Pool(len(peers))
-    result = pool.map(check_peer_2, list(peers))
+    result = pool.map(check_peer, list(peers))
     pool.close()
     pool.join()
     active_peers = set(result)

@@ -27,6 +27,7 @@ def pkscript2addr(pkscript):
     # OP_RETURN
     elif pk_script[0] == b'\x6a':
         return 'null'
+    return False
 
 
 def scriptsig2adddr(scriptsig):

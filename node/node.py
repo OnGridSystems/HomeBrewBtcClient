@@ -33,6 +33,23 @@ HEADERS_SENT = False
 HEADERS_RECEIVED = False
 
 
+def log_txs(blok_id, tx_list):
+    for tx in tx_list:
+        for txin in tx['tx_in']:
+            if not txin['address']:
+                log(blok_id, tx['tx_id'])
+                break
+        for txout in tx['tx_out']:
+            if not txout['address']:
+                log(blok_id, tx['tx_id'])
+                break
+
+
+def log(blok_id, tx_id):
+    with open('txlog', 'a') as file:
+        file.write('\n' + blok_id + ' ' + tx_id)
+
+
 # Build chain of block references each other
 def build_chain(last_block, headers_dict):
     rev_hdrs = {v['prev_block']: v for v in headers_dict.values()}
@@ -114,6 +131,7 @@ if __name__ == '__main__':
     # BLOCK = '00000000000000ad3b482c63afb8137d06402585c757a380917c992be6861e8b'
     # mhKhbPztfWkptFx5o6htd9MYs4PQkg4mP2
     # BLOCK = '000000000000003c1a83f0a57e899ab7656f1a920e3706167dbf50c9d798a3d0'
+    # BLOCK = '000000002b7d410410c38f24c9adfcadd3f09dbc10ab875983266d557c43cf8a'
     HEIGHT = 1383547
     QUEUE = [BLOCK]
 
@@ -289,6 +307,9 @@ if __name__ == '__main__':
             if len(BLOCKS) == BLOCKS_REQ_COUNT:
                 for block in BLOCKS:
                     txs = block['txns']
+                    # for tx logging
+                    log_txs(block['block_id'], txs)
+
                     TX_POOL.extend(process_txs(txs))
                 WAIT_FOR_BLOCK = False
                 print('TX_POOL is', len(TX_POOL), TX_POOL)
