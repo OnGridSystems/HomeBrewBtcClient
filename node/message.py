@@ -5,8 +5,8 @@ import socket
 import struct
 import time
 
-import settings
-
+import node.settings as settings
+from node.bloom import BloomFilter
 
 # The object type is currently defined as one of the following possibilities:
 # Value 	Name 	            Description
@@ -18,12 +18,11 @@ import settings
 #                               only works if a bloom filter has been set.
 # 4 	    MSG_CMPCT_BLOCK 	Hash of a block header; identical to MSG_BLOCK. Only to be used in getdata message.
 #                               Indicates the reply should be a cmpctblock message. See BIP 152 for more info.
-class Type:
-    ERROR = 0
-    MSG_TX = 1
-    MSG_BLOCK = 2
-    MSG_FILTERED_BLOCK = 3
-    MSG_CMPCT_BLOCK = 4
+ERROR = 0
+MSG_TX = 1
+MSG_BLOCK = 2
+MSG_FILTERED_BLOCK = 3
+MSG_CMPCT_BLOCK = 4
 
 
 # MESSAGES https://en.bitcoin.it/wiki/Protocol_documentation
@@ -63,7 +62,9 @@ class Type:
 
 # Number of bytes in payload. The current maximum number of bytes (MAX_SIZE) allowed in the payload by Bitcoin Core
 # is 32 MiB—messages with a payload size larger than this will be dropped or rejected.
-def make(magic, command, payload):
+def make(command, payload, magic=settings.MAGIC):
+    if len(payload) > 1024 * 1024 * 32:
+        raise ValueError('PAYLOAD IS LARGER THAN 32MB')
     checksum = get_checksum(payload)
     return magic + struct.pack('<12sL4s',
                                bytes(command.encode('utf-8')),
@@ -84,25 +85,33 @@ def make(magic, command, payload):
 #  ? 	        user_agent 	    var_str 	User Agent (0x00 if string is 0 bytes long)
 # 4 	        start_height 	int32_t 	The last block received by the emitting node
 # Fields below require version ≥ 70001
-# 1 	        relay 	        bool 	    Whether the remote peer should announce relayed transactions or not,
-#                                           see BIP 0037
-#                                           If false then broadcast transactions will not be announced until
-#                                           a filter{load,add,clear} command is received. If missing or true, no change
-#                                           in protocol behaviour occurs.
+# 1 	        relay 	        bool 	Whether the remote peer should announce relayed transactions or not, see BIP 0037
 def get_version(version=settings.VERSION, services=0, addr_recv=['127.0.0.1', 18333],
-                addr_from=['127.0.0.1', 18333], user_agent='/Testoshi/', start_height=0):
-    version = version
-    services = services
-    timestamp = int(time.time())
+                addr_from=['127.0.0.1', 18333], user_agent='', start_height=0, relay=True):
+    payload = struct.pack('<L', version)
+    payload += struct.pack('<Q', services)
+    payload += struct.pack('<Q', int(time.time()))
+
     addr_recv = net_address(services, addr_recv[0], addr_recv[1])
     addr_from = net_address(services, addr_from[0], addr_from[1])
-    nonce = random.getrandbits(64)
-    user_agent = varstr(user_agent)
-    start_height = start_height
 
-    payload = struct.pack('<LQQ26s26sQ', version, services, timestamp, addr_recv,
-                          addr_from, nonce) + user_agent + struct.pack('<L', start_height)
-    return make(settings.MAGIC, 'version', payload)
+    payload += struct.pack('<26s', addr_recv)
+    payload += struct.pack('<26s', addr_from)
+    nonce = random.getrandbits(64)
+    payload += struct.pack('<Q', nonce)
+
+    user_agent = get_var_str(user_agent)
+
+    payload += user_agent
+    payload += struct.pack('<L', start_height)
+
+    # Relay
+    # If false then broadcast transactions will not be announced until a filter{load,add,clear} command is received.
+    # If missing or true, no change in protocol behaviour occurs.
+    if version >= 70001:
+        payload += struct.pack('B', relay)
+
+    return make('version', payload)
 
 
 # Message header:
@@ -110,9 +119,9 @@ def get_version(version=settings.VERSION, services=0, addr_recv=['127.0.0.1', 18
 #  76 65 72 61  63 6B 00 00 00 00 00 00 - "verack" command
 #  00 00 00 00                          - Payload is 0 bytes long
 #  5D F6 E0 E2                          - Checksum
-def get_verack(magic=settings.MAGIC):
+def get_verack():
     checksum = get_checksum(b'')
-    return make(magic, 'verack', checksum)
+    return make('verack', checksum)
 
 
 # Field Size 	Description 	Data type 	                Comments
@@ -122,7 +131,7 @@ def get_verack(magic=settings.MAGIC):
 # Note: Starting version 31402, addresses are prefixed with a timestamp. If no timestamp is present, the addresses
 # should not be relayed to other peers, unless it is indeed confirmed they are up.
 def get_addr():
-    pass
+    raise NotImplemented
 
 
 # Payload (maximum 50,000 entries, which is just over 1.8 megabytes):
@@ -137,7 +146,7 @@ def get_inv(vectors):
     for v in vectors:
         payload += struct.pack('<L32c', v[0], v[1])
 
-    return make(settings.MAGIC, 'inv', payload)
+    return make('inv', payload)
 
 
 # Payload (maximum 50,000 entries, which is just over 1.8 megabytes):
@@ -146,23 +155,19 @@ def get_inv(vectors):
 # 36x? 	        inventory 	    inv_vect[] 	Inventory vectors
 def get_getdata(vectors):
     payload = b''
-    print(vectors)
     if len(vectors) > 50000:
         raise ValueError('To many vectors')
     payload += get_var_int(len(vectors))
     for v in vectors:
-        # payload += struct.pack('<L32c', v[0], v[1])
-        # print(v[0])
-        # print(v[1])
         payload += struct.pack('<L', v[0]) + binascii.unhexlify(v[1])[::-1]
-    return make(settings.MAGIC, 'getdata', payload)
+    return make('getdata', payload)
 
 
 # Field Size 	Description 	Data type 	Comments
 #  ? 	        count 	        var_int 	Number of inventory entries
 # 36x? 	        inventory 	    inv_vect[] 	Inventory vectors
 def get_notfound():
-    pass
+    raise NotImplemented
 
 
 # Field Size 	Description 	        Data type 	Comments
@@ -172,17 +177,16 @@ def get_notfound():
 #                                                   but then sparse)
 # 32 	        hash_stop 	            char[32] 	hash of the last desired block; set to zero to get as many blocks
 #                                                   as possible (500)
-def get_getblocks(locator):
+def get_getblocks(locator, version=settings.VERSION):
     payload = struct.pack('<L', version)
     # locator is list
-    hashcount = len(locator)
-    hashcount = get_var_int(hashcount)
-    payload += hashcount
-    for h in locator:
-        hl = binascii.unhexlify(h)[::-1]
-        payload += hl
+    hash_count = len(locator)
+    hash_count = get_var_int(hash_count)
+    payload += hash_count
+    for loc_hash in locator:
+        payload += binascii.unhexlify(loc_hash)[::-1]
     payload += b'\x00' * 32
-    return make(settings.MAGIC, 'getblocks', payload)
+    return make('getblocks', payload)
 
 
 # Field Size 	Description 	        Data type 	Comments
@@ -192,27 +196,23 @@ def get_getblocks(locator):
 #                                                   (dense to start, but then sparse)
 # 32 	        hash_stop 	            char[32] 	hash of the last desired block header; set to zero to get as many
 #                                                   blocks as possible (2000)
-def get_getheaders(hashes, stop_hash):
+def get_getheaders(hashes, version=settings.VERSION, stop_hash=b'\x00' * 32):
     hash_count = len(hashes)
     hash_count = get_var_int(hash_count)
     payload = struct.pack('<L', version)
     payload += hash_count
-    for h in hashes:
-        payload += pack_hash(h)
-    if stop_hash is None or len(stop_hash) == 0:
-        stop_hash = b'\0' * 32
-    else:
-        stop_hash = pack_hash(stop_hash)
-    payload += stop_hash
-    return make(settings.MAGIC, 'getheaders', payload)
+    for block_hash in hashes:
+        payload += binascii.unhexlify(block_hash)[::-1]
+    payload += binascii.unhexlify(stop_hash)[::-1]
+    return make('getheaders', payload)
 
 
 def get_tx():
-    pass
+    raise NotImplemented
 
 
 def get_block():
-    pass
+    raise NotImplemented
 
 
 # Field Size 	Description 	        Data type 	Comments
@@ -222,21 +222,34 @@ def get_block():
 #                                                   but then sparse)
 # 32 	        hash_stop 	            char[32] 	hash of the last desired block header; set to zero to get as many
 #                                                   blocks as possible (2000)
-def get_headers(locator):
-    payload = struct.pack('<L', settings.VERSION)
+def get_headers(locator, version=settings.VERSION, hash_stop=b'\x00' * 32):
+    payload = struct.pack('<L', version)
     payload += get_var_int(len(locator))
-    for h in locator:
-        payload += binascii.unhexlify(h)[::-1]
-    payload += b'\x00' * 32
-    return make(settings.MAGIC, 'getheaders', payload)
+    for loc_hash in locator:
+        payload += binascii.unhexlify(loc_hash)[::-1]
+    payload += hash_stop
+    return make('getheaders', payload)
 
 
 def get_getaddr():
-    pass
+    raise NotImplemented
 
 
-def make_header():
-    pass
+# BIP35
+def get_mempool():
+    return make('mempool', b'')
+
+
+def get_checkorder():
+    raise NotImplemented
+
+
+def get_submitorder():
+    raise NotImplemented
+
+
+def get_reply():
+    raise NotImplemented
 
 
 # Field Size 	Description 	Data type 	Comments
@@ -244,32 +257,74 @@ def make_header():
 def get_ping():
     nonce = random.getrandbits(64)
     nonce = struct.pack('<Q', nonce)
-    return make(settings.MAGIC, 'ping', nonce)
+    return make('ping', nonce)
 
 
 # Field Size 	Description 	Data type 	Comments
 # 8 	        nonce 	        uint64_t 	nonce from ping
 def get_pong(nonce):
     nonce = struct.pack('<Q', nonce)
-    return make(settings.MAGIC, 'pong', nonce)
+    return make('pong', nonce)
 
 
-# Payload (maximum 50,000 entries, which is just over 1.8 megabytes):
+def get_reject():
+    raise NotImplemented
+
+
+# BIP37
+
+# Field Size    Description 	Data type 	Comments
+#  ? 	        filter 	        uint8_t[] 	The filter itself is simply a bit field of arbitrary byte-aligned size.
+#                                           The maximum size is 36,000 bytes.
+# 4 	        nHashFuncs 	    uint32_t 	The number of hash functions to use in this filter. The maximum value
+#                                           allowed in this field is 50.
+# 4 	        nTweak 	        uint32_t 	A random value to add to the seed value in the hash function used by
+#                                           the bloom filter.
+# 1 	        nFlags 	        uint8_t 	A set of flags that control how matched items are added to the filter.
+def get_filterload(items, fp_rate, tweak, flags, max_items=None):
+    if type(items) is not list:
+        items = [items]
+    if max_items is None:
+        n_elements = len(items)
+    else:
+        n_elements = max_items
+
+    bloom_filter = BloomFilter(n_elements, fp_rate, tweak)
+    for item in items:
+        bloom_filter.insert(item)
+
+    filter_bytes, num_hash_funcs, tweak = bloom_filter.get_filter_params()
+    payload = filter_bytes + struct.pack('<I', num_hash_funcs) + struct.pack('<I', tweak) + struct.pack('B', flags)
+
+    return make('filterload', payload)
+
+
 # Field Size 	Description 	Data type 	Comments
-# 4 	        type 	        uint32_t 	Identifies the object type linked to this inventory
-# 32 	        hash 	        char[32] 	Hash of the object
-# The object type is currently defined as one of the following possibilities:
-# Value 	Name 	            Description
-# 0 	    ERROR 	            Any data of with this number may be ignored
-# 1 	    MSG_TX 	            Hash is related to a transaction
-# 2 	    MSG_BLOCK 	        Hash is related to a data block
-# 3 	    MSG_FILTERED_BLOCK 	Hash of a block header; identical to MSG_BLOCK. Only to be used in getdata message.
-#                               Indicates the reply should be a merkleblock message rather than a block message; this
-#                               only works if a bloom filter has been set.
-# 4 	    MSG_CMPCT_BLOCK 	Hash of a block header; identical to MSG_BLOCK. Only to be used in getdata message.
-#                               Indicates the reply should be a cmpctblock message. See BIP 152 for more info.
-def get_vector():
-    pass
+#  ? 	        data 	        uint8_t[] 	The data element to add to the current filter.
+def get_filteradd(data):
+    data = binascii.unhexlify(data)[::-1]
+    length = len(data)
+    payload = get_var_int(length) + data
+    return make('filteradd', payload)
+
+
+def get_filterclear():
+    return make('filterclear', b'')
+
+
+def merkleblock():
+    raise NotImplemented
+
+
+# Note: Support for alert messages has been removed from bitcoin core in March 2016
+def get_alert():
+    raise NotImplemented
+
+
+# BIP130
+
+def get_sendheaders():
+    return make('sendheaders', b'')
 
 
 # Added in protocol version 209.
@@ -295,14 +350,6 @@ def get_var_int(ln):
     return b'\xff' + struct.pack('Q', ln)
 
 
-def pack_hash(hash_str):
-    bin_hash = bytes.fromhex(hash_str)
-    x = bytearray(bin_hash)
-    x.reverse()
-    rhash = bytes(x)
-    return rhash
-
-
 # Field Size 	Description 	Data type 	Comments
 # 4 	        time 	        uint32 	    the Time (version >= 31402). Not present in version message.
 # 8 	        services 	    uint64_t 	same service(s) listed in version
@@ -323,5 +370,5 @@ def net_address(service, ip, port):
 # Field Size 	Description 	Data type 	Comments
 #  ? 	        length 	        var_int 	Length of the string
 #  ? 	        string 	        char[] 	    The string itself (can be empty)
-def varstr(text):
+def get_var_str(text):
     return get_var_int(len(text)) + text.encode()
