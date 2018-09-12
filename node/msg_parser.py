@@ -4,9 +4,9 @@ import hashlib
 import ipaddress
 import struct
 
-import message
-import script
-import settings
+import node.message as message
+import node.script as script
+import node.settings as settings
 
 
 def get_message(data):
@@ -14,7 +14,6 @@ def get_message(data):
         index = data.index(settings.MAGIC)
     except ValueError:
         return False
-
     msg = data[index:]
     length = struct.unpack('<L', msg[16:20])[0]
     checksum = msg[20:24]
@@ -28,26 +27,6 @@ def get_message(data):
 def get_command_name(command):
     name = command[4:16]
     return str(name, 'utf-8').strip('\x00')
-
-
-def no_full_message(data):
-    if data.find(settings.MAGIC) < 0:
-        return True
-    index = data.find(settings.MAGIC)
-    if len(data[index:]) < 24:
-        return True
-    msg = data[index:]
-    length = struct.unpack('<L', msg[16:20])[0]
-    if len(msg) < length:
-        return True
-    checksum = msg[20:24]
-    payload = msg[24:24 + length]
-    if len(payload) < length:
-        return True
-    if message.get_checksum(payload) != checksum:
-        print(data)
-        raise ValueError('Checksum mismatch')
-    return False
 
 
 # Payload
@@ -128,14 +107,14 @@ def get_addr(addr):
 def get_headers(data):
     payload = get_payload(data)
     count, offset = parse_var_int(payload)
-    hdrs = []
+    headers_arr = []
     headers = payload[offset:]
     while count:
         h = get_header(headers[:81])
         headers = headers[81:]
-        hdrs.append(h)
+        headers_arr.append(h)
         count -= 1
-    return hdrs
+    return headers_arr
 
 
 # Field Size 	Description 	Data type 	Comments
@@ -150,8 +129,8 @@ def get_headers(data):
 # 1 	        txn_count 	    var_int 	Number of transaction entries, this value is always 0
 def get_header(header):
     res_hdr = {}
-    blockid = get_block_id(header)
-    res_hdr['id'] = blockid
+    block_id = get_block_id(header)
+    res_hdr['id'] = block_id
     version = struct.unpack('<L', header[:4])[0]
     res_hdr['version'] = version
     prev_block = binascii.hexlify(header[4:36][::-1]).decode()
@@ -182,10 +161,10 @@ def get_inv(data):
     vectors = payload[offset:]
     result = [count]
     while count:
-        type = struct.unpack("<L", vectors[:4])[0]
-        hash = vectors[4:36]
-        hash = binascii.hexlify(hash[::-1]).decode()
-        result.append([type, hash])
+        inv_type = struct.unpack("<L", vectors[:4])[0]
+        inv_hash = vectors[4:36]
+        inv_hash = binascii.hexlify(inv_hash[::-1]).decode()
+        result.append([inv_type, inv_hash])
         vectors = vectors[36:]
         count -= 1
     return result
@@ -341,7 +320,6 @@ def get_tx(tx):
 
     res_tx['tx_id'] = get_tx_id(payload[:tx_size])
     res_tx.move_to_end('tx_id', False)
-    # return result_tx, tx_size
     return res_tx, tx_size
 
 
@@ -366,12 +344,10 @@ def get_txin(tx_in):
     sequence = tx_in[36 + total_offset:40 + total_offset]
     sequence = struct.unpack('<I', sequence)[0]
     res_tx_in['sequence'] = sequence
-    # res_tx_in['OPCODE'] = script.to_codes(signature_script)
     try:
         res_tx_in['address'] = script.scriptsig2adddr(signature_script)
     except:
         res_tx_in['address'] = 'unk'
-    # return [previous_output, script_length, signature_script, sequence], total_offset + 40
     return res_tx_in, total_offset + 40
 
 
@@ -386,7 +362,6 @@ def get_outpoint(data):
     outpoint['hash'] = hsh
     index = struct.unpack('<I', data[32:36])[0]
     outpoint['index'] = index
-    # return [hsh, index]
     return outpoint
 
 
@@ -406,9 +381,7 @@ def get_txout(tx_out):
     pk_script = tx_out[8 + offset:8 + offset + pk_script_length]
     pk_script = binascii.hexlify(pk_script).decode()
     res_tx_out['pk_script'] = pk_script
-    # res_tx_out['OPCODES'] = script.to_codes(pk_script)
     res_tx_out['address'] = script.pkscript2addr(pk_script)
-    # return [value, pk_script_length, pk_script], 8 + offset + pk_script_length
     return res_tx_out, 8 + offset + pk_script_length
 
 
@@ -454,7 +427,6 @@ def get_block(block):
         count -= 1
 
     res_block['txns'] = transactions
-    # return [version, prev_block, merkle_root, timestamp, bits, nonce, txn_count, transactions]
     return res_block
 
 
@@ -465,7 +437,7 @@ def get_tx_from_block(block):
 # Note: Support for alert messages has been removed from bitcoin core in March 2016
 def get_alert(alert):
     payload = get_payload(alert)
-    pass
+    return payload
 
 
 # Field Size 	Description 	Data type 	Comments
@@ -488,7 +460,6 @@ def get_payload(data):
     if message.get_checksum(payload) != checksum:
         print(data)
         raise ValueError('Checksum mismatch')
-
     return payload
 
 
@@ -498,6 +469,11 @@ def get_payload(data):
 # <= 0xFFFF FFFF 	5 	            0xFE followed by the length as uint32_t
 # - 	            9 	            0xFF followed by the length as uint64_t
 def parse_var_int(data):
+    """
+    Parse integer packed in variable integer format
+    :param data: bytes leaded by var_int
+    :return: Tuple of integer value and total length of var_int bytes
+    """
     ln = int.from_bytes(data[:1], byteorder='little')
     if ln < 0xfd:
         return ln, 1
@@ -510,6 +486,11 @@ def parse_var_int(data):
 
 
 def parse_var_str(data):
+    """
+    Parse var_string
+    :param data: Var_string leading by string length packed in var_int
+    :return: Tuple of string value and total length of string itself and leading var_int
+    """
     length, offset = parse_var_int(data)
     total_length = offset + length
     string = data[offset: total_length]

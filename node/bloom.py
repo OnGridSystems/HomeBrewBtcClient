@@ -59,6 +59,7 @@ def murmur3(data, seed=0):
     return h1 & 0xffffffff
 
 
+# Implementation of bitcoin bloom filter
 class BloomFilter:
     def __init__(self, element_count, false_positive_rate, tweak):
         self.nElements = element_count
@@ -69,7 +70,7 @@ class BloomFilter:
         self.filter_bytes = bytearray(filter_size)
         self.bit_count = 8 * filter_size
 
-    # data is hash160 address
+    # data must be hash160 address
     def insert(self, data):
         for hash_index in range(self.hash_func_num):
             seed = hash_index * 0xFBA4C795 + self.nTweak
@@ -99,11 +100,6 @@ class BloomFilter:
 
 
 if __name__ == '__main__':
-    h = b'\x07\xbdw\x17\x87.\x19\x96h\x8e\x14\xcf#\r\xc2\xbb>Y\xbf\xde'
-    f = BloomFilter(1, 0.0001, 0)
-    f.insert(h)
-    assert bytes(f.get_filter()) == b'\rZ', 'Filter mismatch'
-
     # CBloomFilter filter(3, 0.01, 0, BLOOM_UPDATE_ALL)
     # filter.insert(ParseHex("99108ad8ed9bb6274d3980bab5a85c048f0950c8"));
     # BOOST_CHECK_MESSAGE( filter.contains(ParseHex("99108ad8ed9bb6274d3980bab5a85c048f0950c8")), "Bloom filter doesn't
@@ -111,15 +107,25 @@ if __name__ == '__main__':
     # // One bit different in first byte
     # BOOST_CHECK_MESSAGE(!filter.contains(ParseHex("19108ad8ed9bb6274d3980bab5a85c048f0950c8")), "Bloom filter
     # contains something it shouldn't!");
-    f = BloomFilter(3, 0.01, 0)
-    f.insert(b"\x99\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8")
-    assert f.contains(b"\x99\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8"), "Bloom filter doesn't contain just-inserted object!"
-    assert not f.contains(b"\x19\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8"), "Bloom filter contains something it shouldn't!"
+    bloom_filter = BloomFilter(3, 0.01, 0)
+    bloom_filter.insert(b"\x99\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8")
+    assert bloom_filter.contains(
+        b"\x99\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8"), "Bloom filter doesn't contain just-inserted object!"
+    assert not bloom_filter.contains(
+        b"\x19\x10\x8a\xd8\xed\x9b\xb6'M9\x80\xba\xb5\xa8\\\x04\x8f\tP\xc8"), "Bloom filter contains something it shouldn't!"
 
     # "b5a2c786d9ef4658287ced5914b37a1b4aa32eee"
-    f.insert(b'\xb5\xa2\xc7\x86\xd9\xefFX(|\xedY\x14\xb3z\x1bJ\xa3.\xee')
-    assert f.contains(b'\xb5\xa2\xc7\x86\xd9\xefFX(|\xedY\x14\xb3z\x1bJ\xa3.\xee'), "Bloom filter doesn't contain just-inserted object!"
+    bloom_filter.insert(b'\xb5\xa2\xc7\x86\xd9\xefFX(|\xedY\x14\xb3z\x1bJ\xa3.\xee')
+    assert bloom_filter.contains(
+        b'\xb5\xa2\xc7\x86\xd9\xefFX(|\xedY\x14\xb3z\x1bJ\xa3.\xee'), "Bloom filter doesn't contain just-inserted object!"
 
     # "b9300670b4c5366e95b2699e8b18bc75e5f729c5"
-    f.insert(b'\xb90\x06p\xb4\xc56n\x95\xb2i\x9e\x8b\x18\xbcu\xe5\xf7)\xc5')
-    assert f.contains(b'\xb90\x06p\xb4\xc56n\x95\xb2i\x9e\x8b\x18\xbcu\xe5\xf7)\xc5'), "Bloom filter doesn't contain just-inserted object!"
+    bloom_filter.insert(b'\xb90\x06p\xb4\xc56n\x95\xb2i\x9e\x8b\x18\xbcu\xe5\xf7)\xc5')
+    assert bloom_filter.contains(
+        b'\xb90\x06p\xb4\xc56n\x95\xb2i\x9e\x8b\x18\xbcu\xe5\xf7)\xc5'), "Bloom filter doesn't contain just-inserted object!"
+
+    bloom_filter = BloomFilter(2, 0.0001, 0)
+    bloom_filter.insert(b'\x07\xbdw\x17\x87.\x19\x96h\x8e\x14\xcf#\r\xc2\xbb>Y\xbf\xde')
+    bloom_filter.insert(b"\x13\xcfg{\x9e\x05\xa0Nx\xe7\x10@nc\xeb\xd7{:['")
+    assert bloom_filter.contains(b'\x07\xbdw\x17\x87.\x19\x96h\x8e\x14\xcf#\r\xc2\xbb>Y\xbf\xde'), 'error'
+    assert bloom_filter.contains(b"\x13\xcfg{\x9e\x05\xa0Nx\xe7\x10@nc\xeb\xd7{:['"), 'error'
