@@ -1,10 +1,10 @@
-from multiprocessing.dummy import Pool
 import random
 import socket
 import time
-
-import settings
 from contextlib import closing
+from multiprocessing.dummy import Pool
+
+import node.settings as settings
 
 
 def lookup():
